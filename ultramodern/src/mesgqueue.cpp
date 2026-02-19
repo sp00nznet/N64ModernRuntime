@@ -110,7 +110,6 @@ bool do_recv(RDRAM_ARG PTR(OSMesgQueue) mq_, PTR(OSMesg) msg_, bool block) {
     } else {
         // Otherwise, yield this thread in a loop until the queue is no longer full
         while (MQ_IS_EMPTY(mq)) {
-            debug_printf("[Message Queue] Thread %d is blocked on receive\n", TO_PTR(OSThread, ultramodern::this_thread())->id);
             ultramodern::thread_queue_insert(PASS_RDRAM GET_MEMBER(OSMesgQueue, mq_, blocked_on_recv), ultramodern::this_thread());
             ultramodern::run_next_thread_and_wait(PASS_RDRAM1);
         }

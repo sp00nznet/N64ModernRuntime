@@ -22,11 +22,17 @@ void ultramodern::set_callbacks(
 }
 
 void ultramodern::preinit(RDRAM_ARG ultramodern::renderer::WindowHandle window_handle) {
+    fprintf(stderr, "[ultramodern] preinit: set_main_thread\n"); fflush(stderr);
     ultramodern::set_main_thread();
+    fprintf(stderr, "[ultramodern] preinit: init_events\n"); fflush(stderr);
     ultramodern::init_events(PASS_RDRAM window_handle);
+    fprintf(stderr, "[ultramodern] preinit: init_timers\n"); fflush(stderr);
     ultramodern::init_timers(PASS_RDRAM1);
+    fprintf(stderr, "[ultramodern] preinit: init_audio\n"); fflush(stderr);
     ultramodern::init_audio();
+    fprintf(stderr, "[ultramodern] preinit: init_thread_cleanup\n"); fflush(stderr);
     ultramodern::init_thread_cleanup();
+    fprintf(stderr, "[ultramodern] preinit: done\n"); fflush(stderr);
 }
 
 extern "C" void osInitialize() {

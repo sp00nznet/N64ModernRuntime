@@ -479,18 +479,23 @@ void run_thread_function(uint8_t* rdram, uint64_t addr, uint64_t sp, uint64_t ar
 }
 
 void init(uint8_t* rdram, recomp_context* ctx, gpr entrypoint) {
+    fprintf(stderr, "[librecomp] init: init_overlays\n"); fflush(stderr);
     // Initialize the overlays
     recomp::overlays::init_overlays();
 
+    fprintf(stderr, "[librecomp] init: load_overlays(0x1000, 0x%08x, 1MB)\n", (uint32_t)entrypoint); fflush(stderr);
     // Load overlays in the first 1MB
     load_overlays(0x1000, (int32_t)entrypoint, 1024 * 1024);
 
+    fprintf(stderr, "[librecomp] init: do_rom_read\n"); fflush(stderr);
     // Initial 1MB DMA (rom address 0x1000 = physical address 0x10001000)
     recomp::do_rom_read(rdram, entrypoint, 0x10001000, 0x100000);
 
+    fprintf(stderr, "[librecomp] init: read_patch_data\n"); fflush(stderr);
     // Read in any extra data from patches
     recomp::overlays::read_patch_data(rdram, (gpr)recomp::patch_rdram_start);
 
+    fprintf(stderr, "[librecomp] init: setting up context\n"); fflush(stderr);
     // Set up context floats
     ctx->f_odd = &ctx->f0.u32h;
     ctx->mips3_float_mode = false;
@@ -508,6 +513,7 @@ void init(uint8_t* rdram, recomp_context* ctx, gpr entrypoint) {
     MEM_W(osRomBase, 0) = 0xB0000000u; // standard rom base
     MEM_W(osResetType, 0) = 0; // cold reset
     MEM_W(osMemSize, 0) = 8 * 1024 * 1024; // 8MB
+    fprintf(stderr, "[librecomp] init: done\n"); fflush(stderr);
 }
 
 std::u8string recomp::current_game_id() {
@@ -642,20 +648,26 @@ bool wait_for_game_started(uint8_t* rdram, recomp_context* context) {
         // TODO refactor this to allow a project to specify what entrypoint function to run for a give game.
         case GameStatus::Running:
             {
+                fprintf(stderr, "[librecomp] game_start: loading stored ROM\n"); fflush(stderr);
                 if (!recomp::load_stored_rom(current_game.value())) {
+                    fprintf(stderr, "[librecomp] game_start: ERROR - failed to load stored ROM!\n"); fflush(stderr);
                     ultramodern::error_handling::message_box("Error opening stored ROM! Please restart this program.");
                 }
+                fprintf(stderr, "[librecomp] game_start: ROM loaded\n"); fflush(stderr);
 
                 auto find_it = game_roms.find(current_game.value());
                 const recomp::GameEntry& game_entry = find_it->second;
 
+                fprintf(stderr, "[librecomp] game_start: init(entrypoint_addr=0x%08x)\n", (uint32_t)game_entry.entrypoint_address); fflush(stderr);
                 init(rdram, context, game_entry.entrypoint_address);
                 if (game_entry.on_init_callback) {
+                    fprintf(stderr, "[librecomp] game_start: calling on_init_callback\n"); fflush(stderr);
                     game_entry.on_init_callback(rdram, context);
                 }
 
                 uint32_t mod_ram_used = 0;
                 if (!game_entry.mod_game_id.empty()) {
+                    fprintf(stderr, "[librecomp] game_start: loading mods\n"); fflush(stderr);
                     std::vector<recomp::mods::ModLoadErrorDetails> mod_load_errors;
                     {
                         std::lock_guard lock { mod_context_mutex };
@@ -670,24 +682,29 @@ bool wait_for_game_started(uint8_t* rdram, recomp_context* context) {
                             if (!cur_error.error_param.empty()) {
                                 mod_error_stream << " (" << cur_error.error_param.c_str() << ")";
                             }
-                            mod_error_stream << "\n";                                
+                            mod_error_stream << "\n";
                         }
                         ultramodern::error_handling::message_box(mod_error_stream.str().c_str());
                         game_status.store(GameStatus::None);
                         return false;
                     }
+                    fprintf(stderr, "[librecomp] game_start: mods loaded (ram_used=%u)\n", mod_ram_used); fflush(stderr);
                 }
 
+                fprintf(stderr, "[librecomp] game_start: init_heap\n"); fflush(stderr);
                 recomp::init_heap(rdram, recomp::mod_rdram_start + mod_ram_used);
 
                 save_type = game_entry.save_type;
+                fprintf(stderr, "[librecomp] game_start: init_saving\n"); fflush(stderr);
                 ultramodern::init_saving(rdram);
 
+                fprintf(stderr, "[librecomp] game_start: calling entrypoint\n"); fflush(stderr);
                 try {
                     game_entry.entrypoint(rdram, context);
                 } catch (ultramodern::thread_terminated& terminated) {
 
                 }
+                fprintf(stderr, "[librecomp] game_start: entrypoint returned\n"); fflush(stderr);
             }
             return true;
 
@@ -734,8 +751,11 @@ void recomp::start(
     const ultramodern::error_handling::callbacks_t& error_handling_callbacks,
     const ultramodern::threads::callbacks_t& threads_callbacks
 ) {
+    fprintf(stderr, "[librecomp] start: setting version\n"); fflush(stderr);
     project_version = version;
+    fprintf(stderr, "[librecomp] start: check_all_stored_roms\n"); fflush(stderr);
     recomp::check_all_stored_roms();
+    fprintf(stderr, "[librecomp] start: set_callbacks\n"); fflush(stderr);
 
     recomp::rsp::set_callbacks(rsp_callbacks);
 
@@ -745,6 +765,7 @@ void recomp::start(
     };
 
     ultramodern::set_callbacks(ultramodern_rsp_callbacks, renderer_callbacks, audio_callbacks, input_callbacks, gfx_callbacks_, events_callbacks, error_handling_callbacks, threads_callbacks);
+    fprintf(stderr, "[librecomp] start: create_gfx\n"); fflush(stderr);
 
     ultramodern::gfx_callbacks_t gfx_callbacks = gfx_callbacks_;
 
@@ -753,6 +774,7 @@ void recomp::start(
     if (gfx_callbacks.create_gfx) {
         gfx_data = gfx_callbacks.create_gfx();
     }
+    fprintf(stderr, "[librecomp] start: create_window\n"); fflush(stderr);
 
     if (window_handle == ultramodern::renderer::WindowHandle{}) {
         if (gfx_callbacks.create_window) {
@@ -762,9 +784,11 @@ void recomp::start(
             assert(false && "No create_window callback provided");
         }
     }
+    fprintf(stderr, "[librecomp] start: init_mods\n"); fflush(stderr);
 
     recomp::mods::initialize_mods();
     recomp::mods::scan_mods();
+    fprintf(stderr, "[librecomp] start: alloc rdram\n"); fflush(stderr);
 
     // Allocate rdram without comitting it. Use a platform-specific virtual allocation function
     // that initializes to zero. Protect the region above the memory size to catch accesses to invalid addresses.
@@ -797,13 +821,19 @@ void recomp::start(
         ultramodern::error_handling::message_box("Failed to allocate memory!");
         return;
     }
+    fprintf(stderr, "[librecomp] start: rdram allocated at %p\n", (void*)rdram); fflush(stderr);
 
     recomp::register_heap_exports();
+    fprintf(stderr, "[librecomp] start: heap exports registered\n"); fflush(stderr);
     recomp::mods::register_config_exports();
+    fprintf(stderr, "[librecomp] start: config exports registered\n"); fflush(stderr);
     recomp::mods::register_hook_exports();
+    fprintf(stderr, "[librecomp] start: hook exports registered, spawning game thread\n"); fflush(stderr);
 
     std::thread game_thread{[](ultramodern::renderer::WindowHandle window_handle, uint8_t* rdram) {
         debug_printf("[Recomp] Starting\n");
+        fprintf(stderr, "[librecomp] game_thread: entered, calling preinit\n"); fflush(stderr);
+        fprintf(stderr, "[librecomp] game_thread: window_handle ptr=%p rdram=%p\n", (void*)window_handle.window, (void*)rdram); fflush(stderr);
 
         ultramodern::set_native_thread_name("Game Start Thread");
 

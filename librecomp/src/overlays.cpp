@@ -186,22 +186,38 @@ void recomp::overlays::read_patch_data(uint8_t* rdram, gpr patch_data_address) {
 }
 
 extern "C" void load_overlays(uint32_t rom, int32_t ram_addr, uint32_t size) {
+    fprintf(stderr, "[overlays] load_overlays(rom=0x%x, ram=0x%x, size=0x%x)\n", rom, ram_addr, size); fflush(stderr);
+
+    // Skip sections with rom_addr=0 (external stubs with no ROM data).
+    // After sorting by rom_addr, these are all at the beginning of the array.
+    SectionTableEntry* begin = &sections_info.code_sections[0];
+    SectionTableEntry* end = &sections_info.code_sections[sections_info.num_code_sections];
+    while (begin < end && begin->rom_addr == 0) {
+        begin++;
+    }
+
     // Search for the first section that's included in the loaded rom range
     // Sections were sorted by `init_overlays` so we can use the bounds functions
-    auto lower = std::lower_bound(&sections_info.code_sections[0], &sections_info.code_sections[sections_info.num_code_sections], rom,
+    auto lower = std::lower_bound(begin, end, rom,
         [](const SectionTableEntry& entry, uint32_t addr) {
             return entry.rom_addr < addr;
         }
     );
-    auto upper = std::upper_bound(&sections_info.code_sections[0], &sections_info.code_sections[sections_info.num_code_sections], (uint32_t)(rom + size),
+    auto upper = std::upper_bound(begin, end, (uint32_t)(rom + size),
         [](uint32_t addr, const SectionTableEntry& entry) {
             return addr < entry.size + entry.rom_addr;
         }
     );
+    fprintf(stderr, "[overlays] found %td matching sections (skipped %td stub sections)\n",
+        upper - lower, begin - &sections_info.code_sections[0]); fflush(stderr);
     // Load the overlays that were found
     for (auto it = lower; it != upper; ++it) {
-        load_overlay(std::distance(&sections_info.code_sections[0], it), it->rom_addr - rom + ram_addr);
+        size_t idx = std::distance(&sections_info.code_sections[0], it);
+        fprintf(stderr, "[overlays] loading section %zu (rom=0x%x, num_funcs=%zu)\n", idx, it->rom_addr, it->num_funcs); fflush(stderr);
+        load_overlay(idx, it->rom_addr - rom + ram_addr);
+        fprintf(stderr, "[overlays] section %zu loaded\n", idx); fflush(stderr);
     }
+    fprintf(stderr, "[overlays] load_overlays done\n"); fflush(stderr);
 }
 
 extern "C" void unload_overlay_by_id(uint32_t id) {
@@ -272,8 +288,11 @@ extern "C" void unload_overlays(int32_t ram_addr, uint32_t size) {
 }
 
 void recomp::overlays::init_overlays() {
+    fprintf(stderr, "[overlays] init_overlays: num_code_sections=%zu total=%zu code_sections=%p\n",
+        sections_info.num_code_sections, sections_info.total_num_sections, (void*)sections_info.code_sections); fflush(stderr);
     func_map.clear();
     section_addresses = (int32_t *)calloc(sections_info.total_num_sections, sizeof(int32_t));
+    fprintf(stderr, "[overlays] section_addresses allocated at %p\n", (void*)section_addresses); fflush(stderr);
 
     // Sort the executable sections by rom address
     std::sort(&sections_info.code_sections[0], &sections_info.code_sections[sections_info.num_code_sections],
@@ -281,15 +300,18 @@ void recomp::overlays::init_overlays() {
             return a.rom_addr < b.rom_addr;
         }
     );
+    fprintf(stderr, "[overlays] sections sorted\n"); fflush(stderr);
 
     for (size_t section_index = 0; section_index < sections_info.num_code_sections; section_index++) {
         SectionTableEntry* code_section = &sections_info.code_sections[section_index];
 
         section_addresses[sections_info.code_sections[section_index].index] = code_section->ram_addr;
-        code_sections_by_rom[code_section->rom_addr] = section_index;        
+        code_sections_by_rom[code_section->rom_addr] = section_index;
     }
+    fprintf(stderr, "[overlays] sections indexed\n"); fflush(stderr);
 
     load_patch_functions();
+    fprintf(stderr, "[overlays] init_overlays done\n"); fflush(stderr);
 }
 
 // Finds a function given a section's index and the function's offset into the section.

@@ -225,15 +225,13 @@ void vi_thread_func() {
         // If the game has started, handle sending VI and AI events.
         if (ultramodern::is_game_started()) {
             remaining_retraces--;
-            
+
             uint8_t* rdram = events_context.rdram;
             std::lock_guard lock{ events_context.message_mutex };
             ViState* cur_state = events_context.vi.get_cur_state();
             if (remaining_retraces == 0) {
                 if (cur_state->mq != NULLPTR) {
-                    if (osSendMesg(PASS_RDRAM cur_state->mq, cur_state->msg, OS_MESG_NOBLOCK) == -1) {
-                        //printf("Game skipped a VI frame!\n");
-                    }
+                    osSendMesg(PASS_RDRAM cur_state->mq, cur_state->msg, OS_MESG_NOBLOCK);
                 }
                 remaining_retraces = cur_state->retrace_count;
             }
@@ -321,6 +319,7 @@ std::atomic<ultramodern::renderer::SetupResult> renderer_setup_result = ultramod
 std::atomic<ultramodern::renderer::GraphicsApi> renderer_chosen_api = ultramodern::renderer::GraphicsApi::Auto;
 
 void gfx_thread_func(uint8_t* rdram, moodycamel::LightweightSemaphore* thread_ready, ultramodern::renderer::WindowHandle window_handle) {
+    fprintf(stderr, "[GFX_THREAD] entered gfx_thread_func\n"); fflush(stderr);
     bool enabled_instant_present = false;
     using namespace std::chrono_literals;
 
@@ -329,7 +328,9 @@ void gfx_thread_func(uint8_t* rdram, moodycamel::LightweightSemaphore* thread_re
 
     auto old_config = ultramodern::renderer::get_graphics_config();
 
+    fprintf(stderr, "[GFX_THREAD] calling create_render_context\n"); fflush(stderr);
     auto renderer_context = ultramodern::renderer::create_render_context(rdram, window_handle, ultramodern::renderer::get_graphics_config().developer_mode);
+    fprintf(stderr, "[GFX_THREAD] create_render_context returned\n"); fflush(stderr);
 
     renderer_chosen_api.store(renderer_context->get_chosen_api());
     if (!renderer_context->valid()) {
