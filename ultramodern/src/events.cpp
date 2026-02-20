@@ -68,6 +68,10 @@ static struct {
         void update_vi() {
             ViState* next_state = get_next_state();
             const OSViMode* next_mode = next_state->mode;
+            if (next_mode == nullptr) {
+                // Game started but hasn't called osViSetMode yet - skip this VI update.
+                return;
+            }
             const OSViCommonRegs* common_regs = &next_mode->comRegs;
             const OSViFieldRegs* field_regs = &next_mode->fldRegs[field];
             PTR(void) framebuffer = osVirtualToPhysical(next_state->framebuffer);
@@ -226,13 +230,13 @@ void vi_thread_func() {
         // If the game has started, handle sending VI and AI events.
         if (ultramodern::is_game_started()) {
             remaining_retraces--;
-            
+
             std::lock_guard lock{ events_context.message_mutex };
             ViState* cur_state = events_context.vi.get_cur_state();
             if (remaining_retraces == 0) {
                 if (cur_state->mq != NULLPTR) {
                     // Send a message to the VI queue, and do not set it to be requeued if the queue was full.
-                    // The worst case scenario is that the game misses a VI message and has to wait a little longer for the next. 
+                    // The worst case scenario is that the game misses a VI message and has to wait a little longer for the next.
                     ultramodern::enqueue_external_message_src(cur_state->mq, cur_state->msg, false, ultramodern::EventMessageSource::Vi);
                 }
                 remaining_retraces = cur_state->retrace_count;

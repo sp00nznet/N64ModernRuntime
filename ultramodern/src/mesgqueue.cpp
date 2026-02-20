@@ -41,7 +41,8 @@ void dequeue_external_messages(RDRAM_ARG1) {
     QueuedMessage to_send;
     std::vector<QueuedMessage> requeued_messages{};
     while (external_messages.try_dequeue(to_send)) {
-        if (!do_send(PASS_RDRAM to_send.mq, to_send.mesg, to_send.jam, false) && to_send.requeue_if_blocked) {
+        bool sent = do_send(PASS_RDRAM to_send.mq, to_send.mesg, to_send.jam, false);
+        if (!sent && to_send.requeue_if_blocked) {
             requeued_messages.push_back(to_send);
         }
     }
@@ -53,7 +54,8 @@ void dequeue_external_messages(RDRAM_ARG1) {
 void ultramodern::wait_for_external_message(RDRAM_ARG1) {
     QueuedMessage to_send;
     external_messages.wait_dequeue(to_send);
-    if (!do_send(PASS_RDRAM to_send.mq, to_send.mesg, to_send.jam, false) && to_send.requeue_if_blocked) {
+    bool sent = do_send(PASS_RDRAM to_send.mq, to_send.mesg, to_send.jam, false);
+    if (!sent && to_send.requeue_if_blocked) {
         external_messages.enqueue(to_send);
     }
 }
@@ -141,6 +143,10 @@ bool do_recv(RDRAM_ARG PTR(OSMesgQueue) mq_, PTR(OSMesg) msg_, bool block) {
             debug_printf("[Message Queue] Thread %d is blocked on receive\n", TO_PTR(OSThread, ultramodern::this_thread())->id);
             ultramodern::thread_queue_insert(PASS_RDRAM GET_MEMBER(OSMesgQueue, mq_, blocked_on_recv), ultramodern::this_thread());
             ultramodern::run_next_thread_and_wait(PASS_RDRAM1);
+            // Process any external messages (from VI/AI/SP/DP threads) that arrived
+            // while this thread was sleeping. Without this, external messages queue up
+            // but are never delivered to game message queues.
+            dequeue_external_messages(PASS_RDRAM1);
         }
     }
 
