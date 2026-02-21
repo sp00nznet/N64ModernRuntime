@@ -22,14 +22,31 @@ void ultramodern::set_audio_frequency(uint32_t freq) {
     sample_rate = freq;
 }
 
-void ultramodern::queue_audio_buffer(RDRAM_ARG PTR(int16_t) audio_data_, uint32_t byte_count) {
-    // Ensure that the byte count is an integer multiple of samples.
-    assert((byte_count & 1) == 0);
+static int audio_buf_count = 0;
 
-    // Calculate the number of samples from the number of bytes.
+void ultramodern::queue_audio_buffer(RDRAM_ARG PTR(int16_t) audio_data_, uint32_t byte_count) {
+    // Bounds-check the N64 address before any pointer conversion.
+    uint32_t phys = (uint32_t)((uint64_t)audio_data_ - 0xFFFFFFFF80000000ULL);
+    if (byte_count == 0 || byte_count > 0x10000 || phys + byte_count > 0x800000) {
+        return; // Invalid buffer - skip silently
+    }
+
+    // Ensure that the byte count is an integer multiple of samples.
+    byte_count &= ~1u;
     uint32_t sample_count = byte_count / sizeof(int16_t);
 
-    // Queue the swapped audio data.
+    audio_buf_count++;
+    if (audio_buf_count <= 10) {
+        int nonzero_bytes = 0;
+        for (uint32_t i = 0; i < byte_count && i < 256; i++) {
+            if (rdram[phys + i] != 0) nonzero_bytes++;
+        }
+        fprintf(stderr, "[AUDIO-BUF] #%d: n64addr=0x%08X phys=0x%06X bytes=%u samples=%u nz=%d\n",
+                audio_buf_count, (uint32_t)audio_data_, phys, byte_count, sample_count, nonzero_bytes);
+        fflush(stderr);
+    }
+
+    // Queue the audio data.
     if (sample_count > 0 && audio_callbacks.queue_samples) {
         audio_callbacks.queue_samples(TO_PTR(int16_t, audio_data_), sample_count);
     }
