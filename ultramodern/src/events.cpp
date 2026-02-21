@@ -101,6 +101,19 @@ static struct {
             regs.VI_Y_SCALE_REG = yScale; // TODO implement osViSetYScale
             regs.VI_STATUS_REG = next_state->control;
             
+            // Log VI register state
+            {
+                static int uvi_count = 0;
+                if (uvi_count < 30 || (uvi_count % 300 == 0)) {
+                    fprintf(stderr, "[VI-DIAG] update_vi #%d: origin=0x%08X width=%u hStart=0x%08X ctrl=0x%08X state=0x%X fb=0x%08X mode_origin=%u field=%d\n",
+                            uvi_count, regs.VI_ORIGIN_REG, regs.VI_WIDTH_REG, hStart,
+                            regs.VI_STATUS_REG, next_state->state, (uint32_t)next_state->framebuffer,
+                            field_regs->origin, field);
+                    fflush(stderr);
+                }
+                uvi_count++;
+            }
+
             // Swap VI states.
             cur_state ^= 1;
             *get_next_state() = *get_cur_state();
@@ -435,6 +448,12 @@ static const OSViMode dummy_mode = []() {
 }();
 
 void set_dummy_vi(bool odd) {
+    static int dummy_count = 0;
+    if (dummy_count < 10 || (dummy_count % 600 == 0)) {
+        fprintf(stderr, "[VI-DIAG] set_dummy_vi #%d: odd=%d\n", dummy_count, (int)odd);
+        fflush(stderr);
+    }
+    dummy_count++;
     ViState* next_state = events_context.vi.get_next_state();
     next_state->mode = &dummy_mode;
     // Set up a dummy framebuffer.
@@ -445,6 +464,12 @@ void set_dummy_vi(bool odd) {
 }
 
 extern "C" void osViSwapBuffer(RDRAM_ARG PTR(void) frameBufPtr) {
+    static int swap_count = 0;
+    if (swap_count < 30 || (swap_count % 300 == 0)) {
+        fprintf(stderr, "[VI-DIAG] osViSwapBuffer #%d: frameBufPtr=0x%08X\n", swap_count, (uint32_t)frameBufPtr);
+        fflush(stderr);
+    }
+    swap_count++;
     std::lock_guard lock{ events_context.message_mutex };
     events_context.vi.get_next_state()->framebuffer = frameBufPtr;
 }
@@ -455,6 +480,13 @@ extern "C" void osViSetMode(RDRAM_ARG PTR(OSViMode) mode_) {
     ViState* next_state = events_context.vi.get_next_state();
     next_state->mode = mode;
     next_state->control = next_state->mode->comRegs.ctrl;
+    static int setmode_count = 0;
+    if (setmode_count < 30 || (setmode_count % 300 == 0)) {
+        fprintf(stderr, "[VI-DIAG] osViSetMode #%d: ctrl=0x%08X width=%u hStart=0x%08X xScale=0x%08X\n",
+                setmode_count, mode->comRegs.ctrl, mode->comRegs.width, mode->comRegs.hStart, mode->comRegs.xScale);
+        fflush(stderr);
+    }
+    setmode_count++;
 }
 
 #define OS_VI_GAMMA_ON          0x0001
@@ -506,6 +538,12 @@ extern "C" void osViSetSpecialFeatures(uint32_t func) {
 }
 
 extern "C" void osViBlack(uint8_t active) {
+    static int black_count = 0;
+    if (black_count < 30 || (black_count % 300 == 0)) {
+        fprintf(stderr, "[VI-DIAG] osViBlack #%d: active=%d\n", black_count, (int)active);
+        fflush(stderr);
+    }
+    black_count++;
     std::lock_guard lock{ events_context.message_mutex };
     ViState* next_state = events_context.vi.get_next_state();
     uint32_t* state_out = &next_state->state;
