@@ -1,6 +1,7 @@
 #include <cstdio>
 #include <fstream>
 #include <ultramodern/ultramodern.hpp>
+#include <ultramodern/rsp.hpp>
 #include "recomp.h"
 
 extern "C" void osSpTaskLoad_recomp(uint8_t* rdram, recomp_context* ctx) {
@@ -12,11 +13,6 @@ bool dump_frame = false;
 extern "C" void osSpTaskStartGo_recomp(uint8_t* rdram, recomp_context* ctx) {
     //printf("[sp] osSpTaskStartGo(0x%08X)\n", (uint32_t)ctx->r4);
     OSTask* task = TO_PTR(OSTask, ctx->r4);
-    if (task->t.type == M_GFXTASK) {
-        //printf("[sp] Gfx task: %08X\n", (uint32_t)ctx->r4);
-    } else if (task->t.type == M_AUDTASK) {
-        //printf("[sp] Audio task: %08X\n", (uint32_t)ctx->r4);
-    }
     // For debugging
     if (dump_frame) {
         char addr_str[32];
@@ -33,7 +29,16 @@ extern "C" void osSpTaskStartGo_recomp(uint8_t* rdram, recomp_context* ctx) {
         dump_file.write(ram_unswapped.get(), ram_size);
         dump_frame = false;
     }
-    ultramodern::submit_rsp_task(rdram, ctx->r4);
+    if (task->t.type == M_AUDTASK) {
+        // Run audio tasks synchronously on the game thread to prevent a race
+        // condition where the game overwrites the command list buffer before
+        // the async RSP thread processes it. DKR double-buffers command lists
+        // but the game thread outruns the RSP thread, corrupting the data.
+        ultramodern::rsp::run_task(rdram, task);
+        ultramodern::send_sp_complete_message(rdram);
+    } else {
+        ultramodern::submit_rsp_task(rdram, ctx->r4);
+    }
 }
 
 extern "C" void osSpTaskYield_recomp(uint8_t* rdram, recomp_context* ctx) {

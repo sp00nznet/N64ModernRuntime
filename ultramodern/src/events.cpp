@@ -569,6 +569,11 @@ void ultramodern::submit_rsp_task(RDRAM_ARG PTR(OSTask) task_) {
     }
 }
 
+void ultramodern::send_sp_complete_message(RDRAM_ARG1) {
+    std::lock_guard lock{ events_context.message_mutex };
+    ultramodern::enqueue_external_message_src(events_context.sp.mq, events_context.sp.msg, false, ultramodern::EventMessageSource::Sp);
+}
+
 void ultramodern::send_si_message() {
     ultramodern::enqueue_external_message_src(events_context.si.mq, events_context.si.msg, false, ultramodern::EventMessageSource::Si);
 }

@@ -45,8 +45,17 @@ bool recomp::rsp::run_task(uint8_t* rdram, const OSTask* task) {
     // Load the OSTask into DMEM
     memcpy(&dmem[0xFC0], task, sizeof(OSTask));
 
-    // Load the ucode data into DMEM
-    dma_rdram_to_dmem(rdram, 0x0000, task->t.ucode_data, 0xF80 - 1);
+    // Load the ucode data into DMEM.
+    // Use the actual ucode_data_size from the task, NOT the max 0xF80.
+    // On real N64, the boot code only loads ucode_data_size bytes, so
+    // DMEM beyond that offset preserves state from the previous task.
+    // This is critical for aspMain: ENVMIXER params at DMEM[0x360] are
+    // set by SAVEBUFF and must persist across tasks.
+    {
+        uint32_t data_sz = task->t.ucode_data_size;
+        if (data_sz == 0 || data_sz > 0xF80) data_sz = 0xF80;
+        dma_rdram_to_dmem(rdram, 0x0000, task->t.ucode_data, data_sz - 1);
+    }
 
     // Run the ucode
     RspExitReason exit_reason = ucode_func(rdram, task->t.ucode);
