@@ -277,7 +277,7 @@ void do_dma(RDRAM_ARG PTR(OSMesgQueue) mq, gpr rdram_address, uint32_t physical_
             // Log first 50 DMA reads, then only audio-region DMAs (RDRAM 0x1C0000-0x1E0000)
             uint32_t rdram_phys = (uint32_t)((uint64_t)rdram_address - 0xFFFFFFFF80000000ULL);
             bool is_audio_region = (rdram_phys >= 0x1C0000 && rdram_phys < 0x1E0000);
-            if (dma_read_count <= 50 || (is_audio_region && dma_read_count <= 500)) {
+            if (dma_read_count <= 5) {
                 uint32_t rom_off = physical_addr - recomp::rom_base;
                 fprintf(stderr, "[PI-DMA] #%d: ROM=0x%08X(off=0x%06X) -> RDRAM=0x%06X size=0x%X%s\n",
                         dma_read_count, physical_addr, rom_off, rdram_phys, size,

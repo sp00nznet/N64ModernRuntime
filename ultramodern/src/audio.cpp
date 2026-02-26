@@ -41,7 +41,7 @@ void ultramodern::queue_audio_buffer(RDRAM_ARG PTR(int16_t) audio_data_, uint32_
         for (uint32_t i = 0; i < byte_count && i < 256; i++) {
             if (rdram[phys + i] != 0) nonzero_bytes++;
         }
-        if (audio_buf_count <= 10 || nonzero_bytes > 0) {
+        if (audio_buf_count <= 5 || (audio_buf_count % 100) == 0) {
             fprintf(stderr, "[AUDIO-BUF] #%d: n64addr=0x%08X phys=0x%06X bytes=%u samples=%u nz=%d\n",
                     audio_buf_count, (uint32_t)audio_data_, phys, byte_count, sample_count, nonzero_bytes);
             fflush(stderr);
