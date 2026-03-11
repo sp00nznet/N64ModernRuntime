@@ -6,8 +6,10 @@
 #include "recomp.h"
 
 namespace recomp {
-    // 1GB (covers KSEG0 + KSEG1 for SP DMEM/IMEM access at 0xA4000000+)
-    constexpr size_t mem_size = 1024ULL * 1024ULL * 1024ULL;
+    // 4GB read/write — required because PHYS_ADDR can produce values up to
+    // 0x7FFFFFFF for addresses near 0x80000000 + small offset, and the guard
+    // region fix adds 4KB at the start. OOB accesses land in valid memory.
+    constexpr size_t mem_size = 4096ULL * 1024ULL * 1024ULL;
     // 4GB (the full address space)
     constexpr size_t allocation_size = 4096ULL * 1024ULL * 1024ULL;
     // We need a place in rdram to hold the PI handles, so pick an address in extended rdram

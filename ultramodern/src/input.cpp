@@ -114,7 +114,13 @@ extern "C" s32 osContStartQuery(RDRAM_ARG PTR(OSMesgQueue) mq) {
     return 0;
 }
 
+static int cont_read_count = 0;
 extern "C" s32 osContStartReadData(RDRAM_ARG PTR(OSMesgQueue) mq) {
+    cont_read_count++;
+    if (cont_read_count <= 10 || (cont_read_count % 500 == 0)) {
+        fprintf(stderr, "[SI] osContStartReadData #%d\n", cont_read_count);
+        fflush(stderr);
+    }
     if (input_callbacks.poll_input != nullptr) {
         input_callbacks.poll_input();
     }
@@ -126,8 +132,12 @@ extern "C" s32 osContStartReadData(RDRAM_ARG PTR(OSMesgQueue) mq) {
 }
 
 extern "C" s32 osContSetCh(RDRAM_ARG u8 ch) {
+    u8 old = max_controllers;
     max_controllers = std::min(ch, u8(MAXCONTROLLERS));
-
+    if (max_controllers != old) {
+        fprintf(stderr, "[SI] osContSetCh(%d) -> max_controllers=%d (was %d)\n", ch, max_controllers, old);
+        fflush(stderr);
+    }
     return 0;
 }
 

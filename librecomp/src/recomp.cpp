@@ -463,7 +463,7 @@ std::atomic<GameStatus> game_status = GameStatus::None;
 void run_thread_function(uint8_t* rdram, uint64_t addr, uint64_t sp, uint64_t arg) {
     auto find_it = game_roms.find(current_game.value());
     const recomp::GameEntry& game_entry = find_it->second;
-    
+
     recomp_context ctx{};
     ctx.r29 = sp;
     ctx.r4 = arg;
@@ -636,7 +636,9 @@ void recomp::mods::set_mod_index(const std::string &mod_game_id, const std::stri
 }
 
 bool wait_for_game_started(uint8_t* rdram, recomp_context* context) {
+    fprintf(stderr, "[DKR-BOOT] wait_for_game_started: waiting...\n"); fflush(stderr);
     game_status.wait(GameStatus::None);
+    fprintf(stderr, "[DKR-BOOT] wait_for_game_started: status=%d\n", (int)game_status.load()); fflush(stderr);
 
     switch (game_status.load()) {
         // TODO refactor this to allow a project to specify what entrypoint function to run for a give game.
@@ -685,14 +687,21 @@ bool wait_for_game_started(uint8_t* rdram, recomp_context* context) {
                     }
                 }
 
+                fprintf(stderr, "[DKR-BOOT] Before init_heap\n"); fflush(stderr);
                 recomp::init_heap(rdram, recomp::mod_rdram_start + mod_ram_used);
+                fprintf(stderr, "[DKR-BOOT] After init_heap\n"); fflush(stderr);
 
                 save_type = game_entry.save_type;
+                fprintf(stderr, "[DKR-BOOT] Before init_saving\n"); fflush(stderr);
                 ultramodern::init_saving(rdram);
+                fprintf(stderr, "[DKR-BOOT] After init_saving\n"); fflush(stderr);
 
+                fprintf(stderr, "[DKR-BOOT] About to call entrypoint function at %p\n", (void*)game_entry.entrypoint);
+                fflush(stderr);
                 try {
                     game_entry.entrypoint(rdram, context);
                 } catch (ultramodern::thread_terminated& terminated) {
+                    fprintf(stderr, "[DKR-BOOT] Entrypoint threw thread_terminated\n"); fflush(stderr);
 
                 }
             }
@@ -730,6 +739,7 @@ bool recomp::flashram_allowed() {
 }
 
 void recomp::start(const recomp::Configuration& cfg) {
+    fprintf(stderr, "[DKR-BOOT] recomp::start() entered\n"); fflush(stderr);
     project_version = cfg.project_version;
     recomp::check_all_stored_roms();
 
@@ -765,33 +775,38 @@ void recomp::start(const recomp::Configuration& cfg) {
     recomp::mods::initialize_mods();
     recomp::mods::scan_mods();
 
-    // Allocate rdram without comitting it. Use a platform-specific virtual allocation function
-    // that initializes to zero. Protect the region above the memory size to catch accesses to invalid addresses.
+    // Allocate rdram with a guard region before and after. The guard region before
+    // prevents crashes from MEM_B/MEM_W with addresses just below 0x80000000 (e.g.,
+    // gzip decompressor underflow). The guard after catches invalid high addresses.
+    constexpr size_t rdram_guard_size = 4096; // 4KB underflow guard
     uint8_t* rdram;
+    uint8_t* rdram_alloc_base; // actual allocation base (before guard)
     bool alloc_failed;
 #ifdef _WIN32
-    rdram = reinterpret_cast<uint8_t*>(VirtualAlloc(nullptr, allocation_size, MEM_COMMIT | MEM_RESERVE, PAGE_NOACCESS));
+    rdram_alloc_base = reinterpret_cast<uint8_t*>(VirtualAlloc(nullptr, allocation_size + rdram_guard_size, MEM_COMMIT | MEM_RESERVE, PAGE_NOACCESS));
     DWORD old_protect = 0;
-    alloc_failed = (rdram == nullptr);
+    alloc_failed = (rdram_alloc_base == nullptr);
     if (!alloc_failed) {
-        // VirtualProtect returns 0 on failure.
-        alloc_failed = (VirtualProtect(rdram, mem_size, PAGE_READWRITE, &old_protect) == 0);
+        // Make the guard region + mem_size readable/writable
+        alloc_failed = (VirtualProtect(rdram_alloc_base, mem_size + rdram_guard_size, PAGE_READWRITE, &old_protect) == 0);
         if (alloc_failed) {
-            VirtualFree(rdram, 0, MEM_RELEASE);
+            VirtualFree(rdram_alloc_base, 0, MEM_RELEASE);
         }
     }
+    rdram = rdram_alloc_base + rdram_guard_size;
 #else
-    rdram = (uint8_t*)mmap(NULL, allocation_size, PROT_NONE, MAP_ANON | MAP_PRIVATE, -1, 0);
-    alloc_failed = rdram == reinterpret_cast<uint8_t*>(MAP_FAILED);
+    rdram_alloc_base = (uint8_t*)mmap(NULL, allocation_size + rdram_guard_size, PROT_NONE, MAP_ANON | MAP_PRIVATE, -1, 0);
+    alloc_failed = rdram_alloc_base == reinterpret_cast<uint8_t*>(MAP_FAILED);
     if (!alloc_failed) {
-        // mprotect returns -1 on failure.
-        alloc_failed = (mprotect(rdram, mem_size, PROT_READ | PROT_WRITE) == -1);
+        alloc_failed = (mprotect(rdram_alloc_base, mem_size + rdram_guard_size, PROT_READ | PROT_WRITE) == -1);
         if (alloc_failed) {
-            munmap(rdram, allocation_size);
+            munmap(rdram_alloc_base, allocation_size + rdram_guard_size);
         }
     }
+    rdram = rdram_alloc_base + rdram_guard_size;
 #endif
 
+    fprintf(stderr, "[DKR-BOOT] VirtualAlloc rdram=%p alloc_failed=%d\n", rdram, alloc_failed); fflush(stderr);
     if (alloc_failed) {
         ultramodern::error_handling::message_box("Failed to allocate memory!");
         return;
@@ -803,14 +818,17 @@ void recomp::start(const recomp::Configuration& cfg) {
 
     std::thread game_thread{[](ultramodern::renderer::WindowHandle window_handle, uint8_t* rdram) {
         debug_printf("[Recomp] Starting\n");
+        fprintf(stderr, "[DKR-BOOT] game_thread started\n"); fflush(stderr);
 
         ultramodern::set_native_thread_name("Game Start Thread");
 
         ultramodern::preinit(rdram, window_handle);
+        fprintf(stderr, "[DKR-BOOT] preinit done\n"); fflush(stderr);
 
         recomp_context context{};
 
         // Loop until the game starts.
+        fprintf(stderr, "[DKR-BOOT] entering wait_for_game_started loop\n"); fflush(stderr);
         while (!wait_for_game_started(rdram, &context)) {}
     }, window_handle, rdram};
 
@@ -832,10 +850,10 @@ void recomp::start(const recomp::Configuration& cfg) {
     bool free_failed;
 #ifdef _WIN32
     // VirtualFree returns zero on failure.
-    free_failed = (VirtualFree(rdram, 0, MEM_RELEASE) == 0);
+    free_failed = (VirtualFree(rdram - rdram_guard_size, 0, MEM_RELEASE) == 0);
 #else
     // munmap returns -1 on failure.
-    free_failed = (munmap(rdram, allocation_size) == -1);
+    free_failed = (munmap(rdram - rdram_guard_size, allocation_size + rdram_guard_size) == -1);
 #endif
 
     if (free_failed) {

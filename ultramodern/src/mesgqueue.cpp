@@ -37,11 +37,42 @@ void ultramodern::enqueue_external_message(PTR(OSMesgQueue) mq, OSMesg msg, bool
 
 bool do_send(RDRAM_ARG PTR(OSMesgQueue) mq_, OSMesg msg, bool jam, bool block);
 
+static int si_send_count = 0;
+static int si_drop_count = 0;
+static int si_requeue_count = 0;
+
 void dequeue_external_messages(RDRAM_ARG1) {
     QueuedMessage to_send;
     std::vector<QueuedMessage> requeued_messages{};
     while (external_messages.try_dequeue(to_send)) {
         bool sent = do_send(PASS_RDRAM to_send.mq, to_send.mesg, to_send.jam, false);
+        // Track SI message delivery (SI queue is typically at 0x80121660 for DKR)
+        // Check by comparing mq value to known SI queue address
+        bool is_si = (to_send.mq == (int32_t)0x80121660);
+        if (is_si) {
+            if (sent) {
+                si_send_count++;
+                if (si_send_count <= 10 || (si_send_count % 500 == 0)) {
+                    fprintf(stderr, "[MQ-SI] Delivered SI #%d (drops=%d requeues=%d)\n",
+                            si_send_count, si_drop_count, si_requeue_count);
+                    fflush(stderr);
+                }
+            } else if (to_send.requeue_if_blocked) {
+                si_requeue_count++;
+                if (si_requeue_count <= 10) {
+                    fprintf(stderr, "[MQ-SI] Requeued SI #%d (sends=%d drops=%d)\n",
+                            si_requeue_count, si_send_count, si_drop_count);
+                    fflush(stderr);
+                }
+            } else {
+                si_drop_count++;
+                if (si_drop_count <= 10 || (si_drop_count % 500 == 0)) {
+                    fprintf(stderr, "[MQ-SI] DROPPED SI #%d (sends=%d requeues=%d)\n",
+                            si_drop_count, si_send_count, si_requeue_count);
+                    fflush(stderr);
+                }
+            }
+        }
         if (!sent && to_send.requeue_if_blocked) {
             requeued_messages.push_back(to_send);
         }

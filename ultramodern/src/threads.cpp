@@ -246,6 +246,9 @@ extern "C" void osStartThread(RDRAM_ARG PTR(OSThread) t_) {
 
 extern "C" void osCreateThread(RDRAM_ARG PTR(OSThread) t_, OSId id, PTR(thread_func_t) entrypoint, PTR(void) arg, PTR(void) sp, OSPri pri) {
     debug_printf("[os] Create Thread %d\n", id);
+    fprintf(stderr, "[DKR-THR] osCreateThread id=%d entry=0x%08X pri=%d sp=0x%08X\n",
+        id, (uint32_t)entrypoint, pri, (uint32_t)sp);
+    fflush(stderr);
     OSThread *t = TO_PTR(OSThread, t_);
     
     t->next = NULLPTR;

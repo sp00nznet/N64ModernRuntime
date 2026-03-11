@@ -100,6 +100,7 @@ void set_main_thread();
 bool is_game_thread();
 void submit_rsp_task(RDRAM_ARG PTR(OSTask) task);
 void send_sp_complete_message(RDRAM_ARG1);
+void send_dp_complete_message(RDRAM_ARG1);
 void send_si_message();
 uint32_t get_speed_multiplier();
 

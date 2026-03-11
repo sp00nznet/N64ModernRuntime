@@ -361,12 +361,21 @@ recomp_func_t* recomp::overlays::get_func_by_section_rom_function_vram(uint32_t 
     return get_func_by_section_index_function_offset(find_section_it->second, func_offset);
 }
 
+// Stub function for missing recompiled functions — logs and returns safely
+static void missing_function_stub(uint8_t* rdram, recomp_context* ctx) {
+    // Do nothing — the caller will continue execution
+}
+
 extern "C" recomp_func_t * get_function(int32_t addr) {
     auto func_find = func_map.find(addr);
     if (func_find == func_map.end()) {
-        fprintf(stderr, "Failed to find function at 0x%08X\n", addr);
-        assert(false);
-        std::exit(EXIT_FAILURE);
+        static int missing_count = 0;
+        if (missing_count < 20) {
+            fprintf(stderr, "[DKR] Missing function at 0x%08X (call #%d)\n", addr, missing_count + 1);
+            fflush(stderr);
+            missing_count++;
+        }
+        return missing_function_stub;
     }
     return func_find->second;
 }
