@@ -1,7 +1,6 @@
 #include "ultramodern/ultramodern.hpp"
 
 #include "helpers.hpp"
-#include <cstdio>
 
 #define MAXCONTROLLERS 4
 
@@ -49,15 +48,6 @@ extern "C" void osContGetReadData_recomp(uint8_t* rdram, recomp_context* ctx) {
     OSContPad dummy_data[MAXCONTROLLERS];
 
     osContGetReadData(dummy_data);
-
-    static int grd_count = 0;
-    grd_count++;
-    if (dummy_data[0].button != 0 || dummy_data[0].stick_x != 0 || dummy_data[0].stick_y != 0 || grd_count <= 10 || (grd_count % 300 == 0)) {
-        fprintf(stderr, "[CONT-READ] #%d: btn=0x%04X stick=(%d,%d) err=%d data=0x%08X\n",
-                grd_count, dummy_data[0].button, dummy_data[0].stick_x, dummy_data[0].stick_y,
-                dummy_data[0].err_no, (uint32_t)data);
-        fflush(stderr);
-    }
 
     for (int controller = 0; controller < MAXCONTROLLERS; controller++) {
         if (dummy_data[controller].err_no == 0) {
