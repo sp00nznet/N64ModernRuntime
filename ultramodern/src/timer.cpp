@@ -192,6 +192,9 @@ extern "C" int osSetTimer(RDRAM_ARG PTR(OSTimer) t_, OSTime countdown, OSTime in
     t->mq = mq;
     t->msg = msg;
 
+    fprintf(stderr, "[TIMER] osSetTimer(countdown=%llu, interval=%llu, mq=0x%08X)\n",
+            (unsigned long long)countdown, (unsigned long long)interval, mq);
+    fflush(stderr);
     timer_context.action_queue.enqueue(AddTimerAction{ t_ });
 
     return 0;

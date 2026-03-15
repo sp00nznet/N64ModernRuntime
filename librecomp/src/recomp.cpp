@@ -404,6 +404,7 @@ extern "C" void osGetMemSize_recomp(uint8_t * rdram, recomp_context * ctx) {
 
 enum class StatusReg {
     FR = 0x04000000,
+    CU1 = 0x20000000, // Coprocessor 1 (FPU) Usable - safe to ignore in recomp
 };
 
 extern "C" void cop0_status_write(recomp_context* ctx, gpr value) {
@@ -429,6 +430,9 @@ extern "C" void cop0_status_write(recomp_context* ctx, gpr value) {
         // Remove the FR bit from the changed bits as it's been handled
         changed &= ~(uint32_t)StatusReg::FR;
     }
+
+    // CU1 (FPU enable) is safe to ignore - FPU is always available on host
+    changed &= ~(uint32_t)StatusReg::CU1;
 
     // If any other bits were changed, assert false as they're not handled currently
     if (changed) {
@@ -509,7 +513,7 @@ void init(uint8_t* rdram, recomp_context* ctx, gpr entrypoint) {
     //constexpr int32_t osVersion = 0x80000314;
     constexpr int32_t osMemSize = 0x80000318;
     //constexpr int32_t osAppNMIBuffer = 0x8000031c;
-    MEM_W(osTvType, 0) = 1; // NTSC
+    MEM_W(osTvType, 0) = 0; // Set to 0 for Rampage games (enables timer/audio init path)
     MEM_W(osRomBase, 0) = 0xB0000000u; // standard rom base
     MEM_W(osResetType, 0) = 0; // cold reset
     MEM_W(osMemSize, 0) = 8 * 1024 * 1024; // 8MB

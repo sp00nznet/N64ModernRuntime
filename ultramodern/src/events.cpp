@@ -66,6 +66,12 @@ static struct {
         }
         void update_vi() {
             ViState* next_state = get_next_state();
+            if (!next_state->mode) {
+                // Mode not set yet - skip VI update
+                static bool warned = false;
+                if (!warned) { fprintf(stderr, "[VI-DIAG] WARNING: VI mode is NULL, skipping update\n"); fflush(stderr); warned = true; }
+                return;
+            }
             const OSViMode* next_mode = next_state->mode;
             const OSViCommonRegs* common_regs = &next_mode->comRegs;
             const OSViFieldRegs* field_regs = &next_mode->fldRegs[field];
