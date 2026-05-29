@@ -361,16 +361,22 @@ recomp_func_t* recomp::overlays::get_func_by_section_rom_function_vram(uint32_t 
     return get_func_by_section_index_function_offset(find_section_it->second, func_offset);
 }
 
-// Stub function for missing recompiled functions — logs and returns safely
+// Stub function for missing recompiled functions — logs caller info and returns safely
 static void missing_function_stub(uint8_t* rdram, recomp_context* ctx) {
-    // Do nothing — the caller will continue execution
+    static int stub_call_count = 0;
+    if (stub_call_count < 30) {
+        fprintf(stderr, "[DKR] missing_function_stub called: ra=0x%08X r4=0x%08X r5=0x%08X\n",
+            (uint32_t)ctx->r31, (uint32_t)ctx->r4, (uint32_t)ctx->r5);
+        fflush(stderr);
+        stub_call_count++;
+    }
 }
 
 extern "C" recomp_func_t * get_function(int32_t addr) {
     auto func_find = func_map.find(addr);
     if (func_find == func_map.end()) {
         static int missing_count = 0;
-        if (missing_count < 20) {
+        if (missing_count < 30) {
             fprintf(stderr, "[DKR] Missing function at 0x%08X (call #%d)\n", addr, missing_count + 1);
             fflush(stderr);
             missing_count++;
