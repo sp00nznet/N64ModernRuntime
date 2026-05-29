@@ -156,18 +156,32 @@ void wait_for_resumed(RDRAM_ARG UltraThreadContext* thread_context) {
 }
 
 void resume_thread(OSThread* t) {
+    if (t == nullptr || t->context == nullptr) {
+        debug_printf("[Thread] Skipping resume of thread with null context\n");
+        return;
+    }
     debug_printf("[Thread] Resuming execution of thread %d\n", t->id);
     t->context->running.signal();
 }
 
 void run_next_thread(RDRAM_ARG1) {
-    if (ultramodern::thread_queue_empty(PASS_RDRAM ultramodern::running_queue)) {
-        throw std::runtime_error("No threads left to run!\n");
+    // Pop threads from the running queue, skipping any whose context has been
+    // destroyed (race with osDestroyThread during scene transitions).
+    // Previous fix attempt that simply returned on NULL context caused deadlocks
+    // because the caller (run_next_thread_and_wait) would block forever.
+    // Instead, keep popping until we find a valid thread to resume.
+    while (!ultramodern::thread_queue_empty(PASS_RDRAM ultramodern::running_queue)) {
+        OSThread* to_run = TO_PTR(OSThread, ultramodern::thread_queue_pop(PASS_RDRAM ultramodern::running_queue));
+        if (to_run != nullptr && to_run->context != nullptr) {
+            debug_printf("[Scheduling] Resuming execution of thread %d\n", to_run->id);
+            to_run->context->running.signal();
+            return;
+        }
+        // Thread was destroyed between enqueue and now — skip it
+        debug_printf("[Scheduling] Skipping thread %d with null context\n",
+                     to_run ? to_run->id : -1);
     }
-
-    OSThread* to_run = TO_PTR(OSThread, ultramodern::thread_queue_pop(PASS_RDRAM ultramodern::running_queue));
-    debug_printf("[Scheduling] Resuming execution of thread %d\n", to_run->id);
-    to_run->context->running.signal();
+    throw std::runtime_error("No threads left to run!\n");
 }
 
 void ultramodern::run_next_thread_and_wait(RDRAM_ARG1) {
