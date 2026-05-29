@@ -7,6 +7,12 @@
 // Forward declaration - implemented in src/f3ddkr.cpp
 extern void f3ddkr_process_dl(uint8_t* rdram, uint32_t dl_addr, uint32_t dl_size);
 
+// Set true by main.cpp when DKR_RENDERER=rt64 is active. When set, GFX
+// tasks go through ultramodern::submit_rsp_task so the gfx thread routes
+// them to the RT64-backed RendererContext. When false (default), GFX tasks
+// run synchronously on the game thread via f3ddkr_process_dl (SW path).
+bool g_dkr_use_rt64_gfx_path = false;
+
 extern "C" void osSpTaskLoad_recomp(uint8_t* rdram, recomp_context* ctx) {
     // Nothing to do here
 }
@@ -45,11 +51,16 @@ extern "C" void osSpTaskStartGo_recomp(uint8_t* rdram, recomp_context* ctx) {
         // Run audio tasks synchronously on the game thread.
         ultramodern::rsp::run_task(rdram, task);
         ultramodern::send_sp_complete_message(PASS_RDRAM1);
+    } else if (g_dkr_use_rt64_gfx_path) {
+        // RT64 mode: hand the task to the gfx thread via ultramodern's
+        // canonical action queue. The gfx thread will call
+        // renderer_context->send_dl, then sp_complete and dp_complete.
+        ultramodern::submit_rsp_task(PASS_RDRAM ctx->r4);
     } else {
-        // Run GFX tasks synchronously on the game thread to avoid external
-        // message queue deadlock. The gfx thread's sp_complete/dp_complete
-        // go through the external queue which starves when all game threads
-        // are blocked on osRecvMesg.
+        // SW path: run GFX tasks synchronously on the game thread to avoid
+        // external message queue deadlock. The gfx thread's sp_complete/
+        // dp_complete go through the external queue which starves when all
+        // game threads are blocked on osRecvMesg.
         ultramodern::send_sp_complete_message(PASS_RDRAM1);
         f3ddkr_process_dl(rdram, task->t.data_ptr, task->t.data_size);
         ultramodern::send_dp_complete_message(PASS_RDRAM1);
