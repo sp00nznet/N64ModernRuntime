@@ -73,7 +73,11 @@ static struct {
             ViState* next_state = get_next_state();
             const OSViMode* next_mode = next_state->mode;
             if (next_mode == nullptr) {
-                // Skip the update if the next mode hasn't been set yet.
+                // No mode set yet: leave the registers alone, but still swap states so that
+                // osViSetEvent registrations take effect. Retraces happen regardless of mode,
+                // and a game may wait for one before it calls osViSetMode.
+                cur_state ^= 1;
+                *get_next_state() = *get_cur_state();
                 return;
             }
 
