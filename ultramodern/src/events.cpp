@@ -473,6 +473,9 @@ extern "C" void osViSetMode(RDRAM_ARG PTR(OSViMode) mode_) {
     OSViMode* mode = TO_PTR(OSViMode, mode_);
     ViState* next_state = events_context.vi.get_next_state();
     next_state->mode = mode;
+    // libultra's osViSetMode overwrites the state (state = VI_STATE_MODE_UPDATED), which clears
+    // BLACK and REPEATLINE. Games rely on this to unblank the screen after osViBlack(TRUE).
+    next_state->state &= ~(VI_STATE_BLACK | VI_STATE_REPEATLINE);
     next_state->control = next_state->mode->comRegs.ctrl;
 }
 
