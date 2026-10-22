@@ -416,6 +416,7 @@ extern "C" void osGetMemSize_recomp(uint8_t * rdram, recomp_context * ctx) {
 
 enum class StatusReg {
     FR = 0x04000000,
+    CU1 = 0x20000000, // COP1 (FPU) usable bit - always enabled in recompiled code
 };
 
 extern "C" void cop0_status_write(recomp_context* ctx, gpr value) {
@@ -440,6 +441,11 @@ extern "C" void cop0_status_write(recomp_context* ctx, gpr value) {
 
         // Remove the FR bit from the changed bits as it's been handled
         changed &= ~(uint32_t)StatusReg::FR;
+    }
+
+    // CU1 (COP1/FPU usable) - always available in recompiled code, just track the bit
+    if (changed & (uint32_t)StatusReg::CU1) {
+        changed &= ~(uint32_t)StatusReg::CU1;
     }
 
     // If any other bits were changed, assert false as they're not handled currently
