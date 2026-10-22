@@ -360,6 +360,21 @@ extern "C" void osEPiReadIo_recomp(RDRAM_ARG recomp_context * ctx) {
     ctx->r2 = 0;
 }
 
+// osPiReadIo(devAddr, *data): libultra reads osRomBase | devAddr, where osRomBase is the
+// cartridge's KSEG1 base (0xB0000000).
+extern "C" void osPiReadIo_recomp(RDRAM_ARG recomp_context * ctx) {
+    uint32_t physical_addr = k1_to_phys(phys_to_k1(recomp::rom_base) | (uint32_t)ctx->r4);
+    gpr dramAddr = ctx->r5;
+
+    if (physical_addr >= recomp::rom_base) {
+        recomp::do_rom_pio(PASS_RDRAM dramAddr, physical_addr);
+    } else {
+        assert(false && "osPiReadIo below cartridge ROM unimplemented");
+    }
+
+    ctx->r2 = 0;
+}
+
 extern "C" void osPiGetStatus_recomp(RDRAM_ARG recomp_context * ctx) {
     ctx->r2 = 0;
 }
