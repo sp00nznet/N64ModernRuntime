@@ -6,8 +6,17 @@
 #include "recomp.h"
 
 namespace recomp {
-    // 512GB (kseg0 size)
-    constexpr size_t mem_size = 512ULL * 1024ULL * 1024ULL;
+    // 512MB (kseg0 size): the part of the address space that is readable/writable.
+    constexpr size_t kseg0_size = 512ULL * 1024ULL * 1024ULL;
+    // A title whose own code touches hardware registers directly (kseg1, 0xA4000000+)
+    // can raise this with RECOMP_MEM_SIZE_MB so those accesses land in scratch memory
+    // instead of faulting. The heap never extends past kseg0_size either way.
+#ifdef RECOMP_MEM_SIZE_MB
+    constexpr size_t mem_size = RECOMP_MEM_SIZE_MB * 1024ULL * 1024ULL;
+    static_assert(mem_size >= kseg0_size);
+#else
+    constexpr size_t mem_size = kseg0_size;
+#endif
     // 4GB (the full address space)
     constexpr size_t allocation_size = 4096ULL * 1024ULL * 1024ULL;
     // We need a place in rdram to hold the PI handles, so pick an address in extended rdram

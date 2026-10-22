@@ -35,7 +35,7 @@ void recomp::init_heap(uint8_t* rdram, uint32_t address) {
 
     // Calculate the offset of the heap from the start of rdram and the size of the heap.
     heap_offset = address - 0x80000000U;
-    size_t heap_size = recomp::mem_size - heap_offset;
+    size_t heap_size = recomp::kseg0_size - heap_offset;
 
     printf("Initializing recomp heap at offset 0x%08X with size 0x%08X\n", heap_offset, static_cast<uint32_t>(heap_size));
 
