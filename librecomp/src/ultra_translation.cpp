@@ -70,7 +70,8 @@ extern "C" void osViSetEvent_recomp(uint8_t * rdram, recomp_context * ctx) {
 }
 
 extern "C" void osGetCount_recomp(uint8_t * rdram, recomp_context * ctx) {
-    ctx->r2 = osGetCount();
+    // mfc0 sign-extends: games compare this against counts loaded with lw.
+    ctx->r2 = (int32_t)osGetCount();
 }
 
 extern "C" void osSetCount_recomp(uint8_t * rdram, recomp_context * ctx) {
