@@ -186,14 +186,21 @@ void recomp::overlays::read_patch_data(uint8_t* rdram, gpr patch_data_address) {
 }
 
 extern "C" void load_overlays(uint32_t rom, int32_t ram_addr, uint32_t size) {
+    // Sections were sorted by `init_overlays` so we can use the bounds functions.
+    // Sections with no ROM data (rom_addr 0, e.g. symbol-only sections for code the game creates
+    // at runtime) sort first and can't be loaded by a ROM DMA. Skip them: their sizes would
+    // otherwise break the ordering upper_bound relies on and send the loop past the array.
+    SectionTableEntry* begin = &sections_info.code_sections[0];
+    SectionTableEntry* end = &sections_info.code_sections[sections_info.num_code_sections];
+    begin = std::find_if(begin, end, [](const SectionTableEntry& entry) { return entry.rom_addr != 0; });
+
     // Search for the first section that's included in the loaded rom range
-    // Sections were sorted by `init_overlays` so we can use the bounds functions
-    auto lower = std::lower_bound(&sections_info.code_sections[0], &sections_info.code_sections[sections_info.num_code_sections], rom,
+    auto lower = std::lower_bound(begin, end, rom,
         [](const SectionTableEntry& entry, uint32_t addr) {
             return entry.rom_addr < addr;
         }
     );
-    auto upper = std::upper_bound(&sections_info.code_sections[0], &sections_info.code_sections[sections_info.num_code_sections], (uint32_t)(rom + size),
+    auto upper = std::upper_bound(lower, end, (uint32_t)(rom + size),
         [](uint32_t addr, const SectionTableEntry& entry) {
             return addr < entry.size + entry.rom_addr;
         }
