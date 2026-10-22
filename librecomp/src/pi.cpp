@@ -162,8 +162,21 @@ void saving_thread_func(RDRAM_ARG1) {
     }
 }
 
+// Save accesses come straight from game code. Check them in every build type: an access past
+// the buffer (usually a wrong SaveType for the title) would otherwise corrupt the heap.
+static bool save_range_ok(uint32_t offset, uint32_t count, const char* what) {
+    if ((uint64_t)offset + count <= save_context.save_buffer.size()) {
+        return true;
+    }
+    fprintf(stderr, "[save] %s out of range: offset 0x%X count 0x%X, save size 0x%zX (wrong save type?)\n",
+        what, offset, count, save_context.save_buffer.size());
+    return false;
+}
+
 void save_write_ptr(const void* in, uint32_t offset, uint32_t count) {
-    assert(offset + count <= save_context.save_buffer.size());
+    if (!save_range_ok(offset, count, "write")) {
+        return;
+    }
 
     {
         std::lock_guard lock { save_context.save_buffer_mutex };
@@ -174,7 +187,9 @@ void save_write_ptr(const void* in, uint32_t offset, uint32_t count) {
 }
 
 void save_write(RDRAM_ARG PTR(void) rdram_address, uint32_t offset, uint32_t count) {
-    assert(offset + count <= save_context.save_buffer.size());
+    if (!save_range_ok(offset, count, "write")) {
+        return;
+    }
 
     {
         std::lock_guard lock { save_context.save_buffer_mutex };
@@ -187,7 +202,9 @@ void save_write(RDRAM_ARG PTR(void) rdram_address, uint32_t offset, uint32_t cou
 }
 
 void save_read(RDRAM_ARG PTR(void) rdram_address, uint32_t offset, uint32_t count) {
-    assert(offset + count <= save_context.save_buffer.size());
+    if (!save_range_ok(offset, count, "read")) {
+        return;
+    }
 
     std::lock_guard lock { save_context.save_buffer_mutex };
     for (gpr i = 0; i < count; i++) {
@@ -196,7 +213,9 @@ void save_read(RDRAM_ARG PTR(void) rdram_address, uint32_t offset, uint32_t coun
 }
 
 void save_clear(uint32_t start, uint32_t size, char value) {
-    assert(start + size < save_context.save_buffer.size());
+    if (!save_range_ok(start, size, "clear")) {
+        return;
+    }
 
     {
         std::lock_guard lock { save_context.save_buffer_mutex };
