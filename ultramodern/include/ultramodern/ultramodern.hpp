@@ -103,6 +103,21 @@ void submit_rsp_task(RDRAM_ARG PTR(OSTask) task);
 void send_si_message();
 uint32_t get_speed_multiplier();
 
+// Deterministic mode (opt-in, for lockstep netplay and replays). Game time stops following the host
+// clock: it advances only when every game thread is blocked, and VI retraces, timers and RSP/RDP
+// completions are delivered at those points in a fixed order. The same inputs then give the same
+// game state on every machine. Requires the game to have an idle thread (one that ends in an
+// infinite loop, recompiled to pause_self). Call enable() before recomp::start.
+namespace det {
+    void enable();
+    bool enabled();
+    // Called on a game thread at every virtual VI retrace, before it is delivered; retrace counts
+    // from 0. It may block, which is how lockstep waits for a remote player's inputs.
+    using frame_callback_t = void (*)(uint64_t retrace);
+    void set_frame_callback(frame_callback_t callback);
+    uint64_t retrace_count();
+}
+
 // Time
 std::chrono::high_resolution_clock::time_point get_start();
 std::chrono::high_resolution_clock::duration time_since_start();
