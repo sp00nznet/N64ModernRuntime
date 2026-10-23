@@ -117,6 +117,14 @@ namespace recomp {
         ultramodern::error_handling::callbacks_t error_handling_callbacks;
         ultramodern::threads::callbacks_t threads_callbacks;
         ultramodern::MessageQueueControl message_queue_control;
+        // Run RSP tasks in the order the hardware would: osSpTaskStartGo returns once the renderer
+        // has read a graphics task's display list (and the RSP reports done only then), and runs
+        // any other task (audio) to completion itself. By default the RSP reports done at once and
+        // tasks are parsed or run on other threads whenever they get to them, while game threads,
+        // which only switch when one blocks, keep running. For titles that free or rewrite the
+        // memory a task reads right after submitting it. Costs some overlap between the game and
+        // the renderer.
+        bool synchronous_rsp_tasks = false;
     };
 
     /// Start the recomp runtime.
