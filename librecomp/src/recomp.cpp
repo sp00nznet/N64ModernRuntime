@@ -933,6 +933,7 @@ void recomp::start(const recomp::Configuration& cfg) {
     }
 
     ultramodern::set_message_queue_control(cfg.message_queue_control);
+    ultramodern::set_synchronous_rsp_tasks(cfg.synchronous_rsp_tasks);
 
     recomp::mods::initialize_mods();
     recomp::mods::scan_mods();

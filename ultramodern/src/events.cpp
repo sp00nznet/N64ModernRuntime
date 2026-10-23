@@ -20,6 +20,11 @@
 #include "ultramodern/renderer_context.hpp"
 
 static ultramodern::events::callbacks_t events_callbacks{};
+static bool synchronous_rsp_tasks = false;
+
+void ultramodern::set_synchronous_rsp_tasks(bool on) {
+    synchronous_rsp_tasks = on;
+}
 
 void ultramodern::events::set_callbacks(const ultramodern::events::callbacks_t& callbacks) {
     events_callbacks = callbacks;
@@ -389,7 +394,7 @@ void gfx_thread_func(uint8_t* rdram, moodycamel::LightweightSemaphore* thread_re
                 // start another graphics task until the RDP is also complete. Games usually preserve the RSP inputs until the RDP
                 // is finished as well, so sending this early shouldn't be an issue in most cases.
                 // If this causes issues then the logic can be replaced with responding to yield requests.
-                if (!ultramodern::det::enabled()) {
+                if (!ultramodern::det::enabled() && !synchronous_rsp_tasks) {
                     sp_complete();
                 }
                 ultramodern::measure_input_latency();
@@ -405,6 +410,9 @@ void gfx_thread_func(uint8_t* rdram, moodycamel::LightweightSemaphore* thread_re
                 [[maybe_unused]] auto renderer_end = std::chrono::high_resolution_clock::now();
 
                 if (!ultramodern::det::enabled()) {
+                    if (synchronous_rsp_tasks) {
+                        sp_complete();
+                    }
                     dp_complete();
                 }
                 // TODO hook the parsed event up to the actual parsing point when a callback is added to RT64.
@@ -625,9 +633,25 @@ void ultramodern::submit_rsp_task(RDRAM_ARG PTR(OSTask) task_) {
 
     // Send gfx tasks to the graphics action queue
     if (task->t.type == M_GFXTASK) {
-        events_context.action_queue.enqueue(SpTaskAction{ *task });
+        if (synchronous_rsp_tasks) {
+            // Wait until the renderer has read the display list, as the RSP would have by now.
+            moodycamel::LightweightSemaphore parsed;
+            events_context.action_queue.enqueue(SpTaskAction{ *task, &parsed });
+            parsed.wait();
+        }
+        else {
+            events_context.action_queue.enqueue(SpTaskAction{ *task });
+        }
     }
     // Set all other tasks as the RSP task
+    else if (synchronous_rsp_tasks) {
+        // Run it here, as the RSP would have finished it before the game's next thread switch.
+        if (!ultramodern::rsp::run_task(PASS_RDRAM task)) {
+            fprintf(stderr, "Failed to execute task type: %" PRIu32 "\n", task->t.type);
+            ULTRAMODERN_QUICK_EXIT();
+        }
+        sp_complete();
+    }
     else {
         events_context.sp_task_queue.enqueue(task);
     }
