@@ -5,6 +5,7 @@
 
 #include "ultramodern/ultra64.h"
 #include "ultramodern/ultramodern.hpp"
+#include "deterministic.hpp"
 
 struct QueuedMessage {
     PTR(OSMesgQueue) mq;
@@ -27,7 +28,18 @@ void ultramodern::set_message_queue_control(const ultramodern::MessageQueueContr
     requeue_enabled.set(static_cast<int>(EventMessageSource::Dp), mqc.requeue_dp);
 }
 
+// In deterministic mode every message must come from a game thread (posted at a fixed point);
+// one from a host thread arrives at a host-timed moment and breaks determinism.
+static void check_deterministic_source() {
+    static bool warned = false;
+    if (ultramodern::det::enabled() && !ultramodern::is_game_thread() && !warned) {
+        warned = true;
+        fprintf(stderr, "[ultramodern] deterministic mode: a host thread posted a game message\n");
+    }
+}
+
 void ultramodern::enqueue_external_message_src(PTR(OSMesgQueue) mq, OSMesg msg, bool jam, EventMessageSource src) {
+    check_deterministic_source();
     external_messages.enqueue({mq, msg, jam, requeue_enabled[static_cast<int>(src)]});
 }
 
@@ -51,6 +63,10 @@ void dequeue_external_messages(RDRAM_ARG1) {
 }
 
 void ultramodern::wait_for_external_message(RDRAM_ARG1) {
+    if (ultramodern::det::enabled()) {
+        ultramodern::det::idle(PASS_RDRAM1);
+        return;
+    }
     QueuedMessage to_send;
     external_messages.wait_dequeue(to_send);
     if (!do_send(PASS_RDRAM to_send.mq, to_send.mesg, to_send.jam, false) && to_send.requeue_if_blocked) {
@@ -59,6 +75,10 @@ void ultramodern::wait_for_external_message(RDRAM_ARG1) {
 }
 
 void ultramodern::wait_for_external_message_timed(RDRAM_ARG u32 millis) {
+    if (ultramodern::det::enabled()) {
+        ultramodern::det::idle(PASS_RDRAM1);
+        return;
+    }
     QueuedMessage to_send;
     if (external_messages.wait_dequeue_timed(to_send, std::chrono::milliseconds{millis})) {
         if (!do_send(PASS_RDRAM to_send.mq, to_send.mesg, to_send.jam, false) && to_send.requeue_if_blocked) {

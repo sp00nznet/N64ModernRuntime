@@ -13,6 +13,7 @@
 
 #include "ultramodern/ultra64.h"
 #include "ultramodern/ultramodern.hpp"
+#include "deterministic.hpp"
 #include "ultramodern/extensions.h"
 
 #include "ultramodern/rsp.hpp"
@@ -26,6 +27,9 @@ void ultramodern::events::set_callbacks(const ultramodern::events::callbacks_t& 
 
 struct SpTaskAction {
     OSTask task;
+    // Deterministic mode: signalled once the renderer has parsed the display list, so the game
+    // (already told the task is done) can't overwrite it mid-parse.
+    moodycamel::LightweightSemaphore* parsed = nullptr;
 };
 
 struct ScreenUpdateAction {
@@ -233,6 +237,19 @@ void vi_thread_func() {
 
         // Queue a screen update for the graphics thread with the current VI register state.
         // Doing this before the VI update is equivalent to updating the screen after the previous frame's scanout finished.
+        if (ultramodern::det::enabled() && ultramodern::is_game_started()) {
+            // Deterministic mode: retraces reach the game from det::idle (vi_retrace below); this thread only presents.
+            ultramodern::renderer::ViRegs regs;
+            {
+                std::lock_guard lock{ events_context.message_mutex };
+                regs = events_context.vi.regs;
+            }
+            events_context.action_queue.enqueue(ScreenUpdateAction{ regs });
+            if (events_callbacks.vi_callback != nullptr) {
+                events_callbacks.vi_callback();
+            }
+            continue;
+        }
         events_context.action_queue.enqueue(ScreenUpdateAction{ events_context.vi.regs });
 
         // Update VI registers and swap VI modes.
@@ -372,7 +389,9 @@ void gfx_thread_func(uint8_t* rdram, moodycamel::LightweightSemaphore* thread_re
                 // start another graphics task until the RDP is also complete. Games usually preserve the RSP inputs until the RDP
                 // is finished as well, so sending this early shouldn't be an issue in most cases.
                 // If this causes issues then the logic can be replaced with responding to yield requests.
-                sp_complete();
+                if (!ultramodern::det::enabled()) {
+                    sp_complete();
+                }
                 ultramodern::measure_input_latency();
 
                 PTR(u64) displaylist = task_action->task.t.data_ptr;
@@ -380,9 +399,14 @@ void gfx_thread_func(uint8_t* rdram, moodycamel::LightweightSemaphore* thread_re
 
                 [[maybe_unused]] auto renderer_start = std::chrono::high_resolution_clock::now();
                 renderer_context->send_dl(&task_action->task);
+                if (task_action->parsed != nullptr) {
+                    task_action->parsed->signal();
+                }
                 [[maybe_unused]] auto renderer_end = std::chrono::high_resolution_clock::now();
 
-                dp_complete();
+                if (!ultramodern::det::enabled()) {
+                    dp_complete();
+                }
                 // TODO hook the parsed event up to the actual parsing point when a callback is added to RT64.
                 ultramodern::extensions::on_displaylist_parsed(displaylist);
                 ultramodern::extensions::on_displaylist_completed(displaylist);
@@ -562,15 +586,42 @@ extern "C" void osViSetYScale(float scale) {
 }
 
 extern "C" PTR(void) osViGetNextFramebuffer() {
+    // A game polling this in a loop waits for a retrace; let virtual time reach it (deterministic mode).
+    if (ultramodern::det::enabled()) {
+        (void)ultramodern::det::now_for_read();
+    }
     return events_context.vi.get_next_state()->framebuffer;
 }
 
 extern "C" PTR(void) osViGetCurrentFramebuffer() {
+    // A game polling this in a loop waits for a retrace; let virtual time reach it (deterministic mode).
+    if (ultramodern::det::enabled()) {
+        (void)ultramodern::det::now_for_read();
+    }
     return events_context.vi.get_cur_state()->framebuffer;
 }
 
 void ultramodern::submit_rsp_task(RDRAM_ARG PTR(OSTask) task_) {
     OSTask* task = TO_PTR(OSTask, task_);
+
+    // Deterministic mode: post completions from this (game) thread at a fixed point instead of from
+    // the task/gfx threads whenever they finish. Graphics still render on the gfx thread.
+    if (ultramodern::det::enabled()) {
+        if (task->t.type == M_GFXTASK) {
+            moodycamel::LightweightSemaphore parsed;
+            events_context.action_queue.enqueue(SpTaskAction{ *task, &parsed });
+            parsed.wait();
+            sp_complete();
+            dp_complete();
+        } else {
+            if (!ultramodern::rsp::run_task(PASS_RDRAM task)) {
+                fprintf(stderr, "Failed to execute task type: %" PRIu32 "\n", task->t.type);
+                ULTRAMODERN_QUICK_EXIT();
+            }
+            sp_complete();
+        }
+        return;
+    }
 
     // Send gfx tasks to the graphics action queue
     if (task->t.type == M_GFXTASK) {
@@ -579,6 +630,24 @@ void ultramodern::submit_rsp_task(RDRAM_ARG PTR(OSTask) task_) {
     // Set all other tasks as the RSP task
     else {
         events_context.sp_task_queue.enqueue(task);
+    }
+}
+
+// Deterministic mode's retrace (called from det::idle on a game thread): what vi_thread_func does
+// for the game on a host-timed retrace.
+void ultramodern::det::vi_retrace(RDRAM_ARG1) {
+    static int remaining_retraces = 1;
+    std::lock_guard lock{ events_context.message_mutex };
+    events_context.vi.update_vi();
+    ViState* cur_state = events_context.vi.get_cur_state();
+    if (--remaining_retraces <= 0) {
+        if (cur_state->mq != NULLPTR) {
+            ultramodern::enqueue_external_message_src(cur_state->mq, cur_state->msg, false, ultramodern::EventMessageSource::Vi);
+        }
+        remaining_retraces = cur_state->retrace_count;
+    }
+    if (events_context.ai.mq != NULLPTR) {
+        ultramodern::enqueue_external_message_src(events_context.ai.mq, events_context.ai.msg, false, ultramodern::EventMessageSource::Ai);
     }
 }
 
