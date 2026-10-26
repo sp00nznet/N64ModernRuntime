@@ -5,6 +5,7 @@
 
 #include "ultramodern/ultra64.h"
 #include "ultramodern/ultramodern.hpp"
+#include "deterministic.hpp"
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -63,6 +64,9 @@ std::chrono::high_resolution_clock::time_point ticks_to_timepoint(uint64_t ticks
 }
 
 uint64_t time_now() {
+    if (ultramodern::det::enabled()) {
+        return ultramodern::det::now_for_read();
+    }
     return duration_to_ticks(std::chrono::high_resolution_clock::now() - start_time);
 }
 
@@ -140,7 +144,49 @@ void timer_thread(RDRAM_ARG1) {
     }
 }
 
+// Deterministic mode keeps active timers here (touched only by game threads) instead of using the
+// timer thread, and fires them from virtual time.
+struct DetTimerOrder {
+    uint8_t* rdram;
+    bool operator()(PTR(OSTimer) a_, PTR(OSTimer) b_) const {
+        OSTimer* a = TO_PTR(OSTimer, a_);
+        OSTimer* b = TO_PTR(OSTimer, b_);
+        if (a->timestamp != b->timestamp) {
+            return a->timestamp < b->timestamp;
+        }
+        return a_ < b_;
+    }
+};
+static std::set<PTR(OSTimer), DetTimerOrder>* det_timers = nullptr;
+
+static std::set<PTR(OSTimer), DetTimerOrder>& get_det_timers(RDRAM_ARG1) {
+    if (det_timers == nullptr) {
+        det_timers = new std::set<PTR(OSTimer), DetTimerOrder>(DetTimerOrder{ PASS_RDRAM1 });
+    }
+    return *det_timers;
+}
+
+uint64_t ultramodern::det::next_timer_timestamp(RDRAM_ARG1) {
+    auto& timers = get_det_timers(PASS_RDRAM1);
+    return timers.empty() ? UINT64_MAX : TO_PTR(OSTimer, *timers.begin())->timestamp;
+}
+
+void ultramodern::det::fire_timers(RDRAM_ARG uint64_t now) {
+    auto& timers = get_det_timers(PASS_RDRAM1);
+    while (!timers.empty() && TO_PTR(OSTimer, *timers.begin())->timestamp <= now) {
+        PTR(OSTimer) t_ = *timers.begin();
+        OSTimer* t = TO_PTR(OSTimer, t_);
+        timers.erase(timers.begin());
+        ultramodern::enqueue_external_message_src(t->mq, t->msg, false, ultramodern::EventMessageSource::Timer);
+        if (t->interval != 0) {
+            t->timestamp += t->interval;
+            timers.insert(t_);
+        }
+    }
+}
+
 void ultramodern::init_timers(RDRAM_ARG1) {
+    ultramodern::det::set_rdram(PASS_RDRAM1);
     timer_context.thread = std::thread{ timer_thread, PASS_RDRAM1 };
     timer_context.thread.detach();
 }
@@ -181,6 +227,11 @@ extern "C" void osSetTime(OSTime t) {
 extern "C" int osSetTimer(RDRAM_ARG PTR(OSTimer) t_, OSTime countdown, OSTime interval, PTR(OSMesgQueue) mq, OSMesg msg) {
     OSTimer* t = TO_PTR(OSTimer, t_);
 
+    // In deterministic mode the set is ordered by timestamp, so take the timer out before changing it.
+    if (ultramodern::det::enabled()) {
+        get_det_timers(PASS_RDRAM1).erase(t_);
+    }
+
     // Determine the time when this timer will trigger off
     if (countdown == 0) {
         // Set the timestamp based on the interval
@@ -192,12 +243,21 @@ extern "C" int osSetTimer(RDRAM_ARG PTR(OSTimer) t_, OSTime countdown, OSTime in
     t->mq = mq;
     t->msg = msg;
 
+    if (ultramodern::det::enabled()) {
+        get_det_timers(PASS_RDRAM1).insert(t_);
+        return 0;
+    }
+
     timer_context.action_queue.enqueue(AddTimerAction{ t_ });
 
     return 0;
 }
 
 extern "C" int osStopTimer(RDRAM_ARG PTR(OSTimer) t_) {
+    if (ultramodern::det::enabled()) {
+        get_det_timers(PASS_RDRAM1).erase(t_);
+        return 0;
+    }
     timer_context.action_queue.enqueue(RemoveTimerAction{ t_ });
 
     // TODO don't blindly return 0 here; requires some response from the timer thread to know what the returned value was
